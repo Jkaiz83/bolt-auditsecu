@@ -1,77 +1,124 @@
+// server.js
 const express = require('express');
+const axios   = require('axios');
 const { spawn } = require('child_process');
-const path = require('path');
+const path    = require('path');
+require('dotenv').config();
+
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static('public'));
 
-// Fonction pour exécuter le script PowerShell
+// --- ta fonction existante pour PowerShell ---
 function executePowerShell(jsonParams) {
-    return new Promise((resolve, reject) => {
-        const scriptPath = path.join(__dirname, 'clickup-automation.ps1');
-        
-        const powershell = spawn('powershell.exe', [
-            '-ExecutionPolicy', 'Bypass',
-            '-File', scriptPath,
-            '-JsonParams', JSON.stringify(jsonParams)
-        ]);
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, 'clickup-automation.ps1');
+    const powershell = spawn('pwsh', [
+      '-ExecutionPolicy', 'Bypass',
+      '-File', scriptPath,
+      '-JsonParams', JSON.stringify(jsonParams)
+    ]);
 
-        let stdout = '';
-        let stderr = '';
+    let stdout = '', stderr = '';
+    powershell.stdout.on('data', d => stdout += d.toString());
+    powershell.stderr.on('data', d => stderr += d.toString());
 
-        powershell.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        powershell.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        powershell.on('close', (code) => {
-            if (code === 0) {
-                try {
-                    // Tenter de parser le JSON de sortie
-                    const result = JSON.parse(stdout.trim());
-                    resolve(result);
-                } catch (error) {
-                    // Si ce n'est pas du JSON, retourner le texte brut
-                    resolve({ success: true, output: stdout.trim() });
-                }
-            } else {
-                reject({ success: false, error: stderr || `Process exited with code ${code}` });
-            }
-        });
-
-        powershell.on('error', (error) => {
-            reject({ success: false, error: error.message });
-        });
+    powershell.on('close', code => {
+      if (code === 0) {
+        try {
+          resolve(JSON.parse(stdout.trim()));
+        } catch {
+          resolve({ success: true, output: stdout.trim() });
+        }
+      } else {
+        reject({ success: false, error: stderr || `Exit code ${code}` });
+      }
     });
+    powershell.on('error', e => reject({ success: false, error: e.message }));
+  });
 }
 
-// Route pour exécuter les actions PowerShell
+// --- nouveau /api/execute dispatché selon action ---
 app.post('/api/execute', async (req, res) => {
-    try {
-        const result = await executePowerShell(req.body);
-        res.json(result);
-    } catch (error) {
-        res.status(500).json(error);
+  const { action, apiKey, domain, workspaceId, folderId, listId, status } = req.body;
+
+  try {
+    switch (action) {
+      case 'getWorkspaces': {
+        // GET /team → teams[]
+        const resp = await axios.get(
+          'https://api.clickup.com/api/v2/team',
+          { headers: { Authorization: apiKey } }
+        );
+        return res.json({ success: true, data: resp.data.teams });
+      }
+
+      case 'getSpaces': {
+        // GET /team/{team_id}/space → spaces[]
+        const resp = await axios.get(
+          `https://api.clickup.com/api/v2/team/${workspaceId}/space`,
+          { headers: { Authorization: apiKey } }
+        );
+        return res.json({ success: true, data: resp.data.spaces });
+      }
+
+      case 'getFoldersAndLists': {
+        // Récupère dossiers…
+        const [foldRes, listRes] = await Promise.all([
+          axios.get(
+            `https://api.clickup.com/api/v2/space/${workspaceId}/folder`,
+            { headers: { Authorization: apiKey } }
+          ),
+          axios.get(
+            `https://${domain}.clickup.com/api/v2/space/${workspaceId}/list`,
+            { headers: { Authorization: apiKey } }
+          )
+        ]);
+        const folders = (foldRes.data.folders || [])
+          .map(f => ({ ...f, type: 'folder' }));
+        const lists   = (listRes.data.lists  || [])
+          .map(l => ({ ...l, type: 'list' }));
+        return res.json({ success: true, data: [...folders, ...lists] });
+      }
+
+      case 'getListStatuses': {
+        // GET /list/{list_id} → statuses[]
+        const resp = await axios.get(
+          `https://${domain}.clickup.com/api/v2/list/${listId}`,
+          { headers: { Authorization: apiKey } }
+        );
+        return res.json({ success: true, data: resp.data.statuses });
+      }
+
+      case 'getTasks': {
+        // GET /list/{list_id}/task?status=… → tasks[]
+        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        const resp = await axios.get(
+          `https://${domain}.clickup.com/api/v2/list/${listId}/task${q}`,
+          { headers: { Authorization: apiKey } }
+        );
+        return res.json({ success: true, data: resp.data.tasks });
+      }
+
+      // … ajoute d’autres actions custom si besoin …
+
+      default:
+        // (fallback) toutes les autres actions passent à ton PowerShell
+        const psResult = await executePowerShell(req.body);
+        return res.json(psResult);
     }
-});
 
-// Route pour les logs en streaming (optionnel)
-app.get('/api/logs', (req, res) => {
-    res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+  } catch (err) {
+    console.error(`[${action}]`, err.response?.data || err.message);
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data?.err || err.message
     });
-
-    // Ici vous pourriez implémenter un système de logs en temps réel
-    res.write('data: {"message": "Logs en temps réel activés"}\n\n');
+  }
 });
 
 app.listen(port, () => {
-    console.log(`Serveur démarré sur http://localhost:${port}`);
+  console.log(`Serveur démarré sur http://localhost:${port}`);
 });
