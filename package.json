@@ -1,0 +1,22 @@
+{
+  "name": "clickup-powershell-web",
+  "version": "1.0.0",
+  "description": "Interface web pour automatisation ClickUp via PowerShell",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@types/node": "^24.1.0",
+    "express": "^4.18.2"
+  },
+  "keywords": [
+    "clickup",
+    "powershell",
+    "automation",
+    "web"
+  ],
+  "author": "",
+  "license": "MIT"
+}
