@@ -5,16 +5,17 @@ const { spawn } = require('child_process');
 const path    = require('path');
 require('dotenv').config();
 
-const app = express();
+const app  = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static('public'));
 
-// --- ta fonction existante pour PowerShell ---
+// --- Exécute le script PowerShell pour les autres actions ---
 function executePowerShell(jsonParams) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, 'clickup-automation.ps1');
+    //powershell.exe à la place de pwsh
     const powershell = spawn('pwsh', [
       '-ExecutionPolicy', 'Bypass',
       '-File', scriptPath,
@@ -36,18 +37,19 @@ function executePowerShell(jsonParams) {
         reject({ success: false, error: stderr || `Exit code ${code}` });
       }
     });
+
     powershell.on('error', e => reject({ success: false, error: e.message }));
   });
 }
 
-// --- nouveau /api/execute dispatché selon action ---
+// --- Endpoint unique dispatché selon l'action reçue ---
 app.post('/api/execute', async (req, res) => {
-  const { action, apiKey, domain, workspaceId, folderId, listId, status } = req.body;
+  const { action, apiKey, workspaceId, spaceId, folderId, listId, status } = req.body;
 
   try {
     switch (action) {
       case 'getWorkspaces': {
-        // GET /team → teams[]
+        // Récupère tous les workspaces (teams)
         const resp = await axios.get(
           'https://api.clickup.com/api/v2/team',
           { headers: { Authorization: apiKey } }
@@ -56,7 +58,7 @@ app.post('/api/execute', async (req, res) => {
       }
 
       case 'getSpaces': {
-        // GET /team/{team_id}/space → spaces[]
+        // Récupère les espaces d'un workspace
         const resp = await axios.get(
           `https://api.clickup.com/api/v2/team/${workspaceId}/space`,
           { headers: { Authorization: apiKey } }
@@ -65,53 +67,58 @@ app.post('/api/execute', async (req, res) => {
       }
 
       case 'getFoldersAndLists': {
-        // Récupère dossiers…
+        // Récupère dossiers + listes directes dans un espace
         const [foldRes, listRes] = await Promise.all([
           axios.get(
-            `https://api.clickup.com/api/v2/space/${workspaceId}/folder`,
+            `https://api.clickup.com/api/v2/space/${spaceId}/folder`,
             { headers: { Authorization: apiKey } }
           ),
           axios.get(
-            `https://${domain}.clickup.com/api/v2/space/${workspaceId}/list`,
+            `https://api.clickup.com/api/v2/space/${spaceId}/list`,
             { headers: { Authorization: apiKey } }
           )
         ]);
-        const folders = (foldRes.data.folders || [])
-          .map(f => ({ ...f, type: 'folder' }));
-        const lists   = (listRes.data.lists  || [])
-          .map(l => ({ ...l, type: 'list' }));
+        const folders = (foldRes.data.folders || []).map(f => ({ ...f, type: 'folder' }));
+        const lists   = (listRes.data.lists  || []).map(l => ({ ...l, type: 'list' }));
         return res.json({ success: true, data: [...folders, ...lists] });
       }
 
-      case 'getListStatuses': {
-        // GET /list/{list_id} → statuses[]
+      case 'getFolderLists': {
+        // Récupère les listes à l'intérieur d'un dossier
         const resp = await axios.get(
-          `https://${domain}.clickup.com/api/v2/list/${listId}`,
+          `https://api.clickup.com/api/v2/folder/${folderId}/list`,
+          { headers: { Authorization: apiKey } }
+        );
+        return res.json({ success: true, data: resp.data.lists });
+      }
+
+      case 'getListStatuses': {
+        // Récupère statuts d'une liste
+        const resp = await axios.get(
+          `https://api.clickup.com/api/v2/list/${listId}`,
           { headers: { Authorization: apiKey } }
         );
         return res.json({ success: true, data: resp.data.statuses });
       }
 
       case 'getTasks': {
-        // GET /list/{list_id}/task?status=… → tasks[]
-        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        // Récupère tâches d'une liste (filtrables par status)
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
         const resp = await axios.get(
-          `https://${domain}.clickup.com/api/v2/list/${listId}/task${q}`,
+          `https://api.clickup.com/api/v2/list/${listId}/task${query}`,
           { headers: { Authorization: apiKey } }
         );
         return res.json({ success: true, data: resp.data.tasks });
       }
 
-      // … ajoute d’autres actions custom si besoin …
-
       default:
-        // (fallback) toutes les autres actions passent à ton PowerShell
+        // Toutes les autres actions passent par PowerShell
         const psResult = await executePowerShell(req.body);
         return res.json(psResult);
     }
 
   } catch (err) {
-    console.error(`[${action}]`, err.response?.data || err.message);
+    console.error(`[${action}] ERROR:`, err.response?.data || err.message);
     return res.status(500).json({
       success: false,
       error: err.response?.data?.err || err.message
@@ -119,6 +126,7 @@ app.post('/api/execute', async (req, res) => {
   }
 });
 
+// Démarre le serveur
 app.listen(port, () => {
   console.log(`Serveur démarré sur http://localhost:${port}`);
 });
