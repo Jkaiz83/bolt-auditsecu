@@ -22,33 +22,41 @@ class ClickUpApp {
     }
 
     bindEvents() {
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', e => {
-                e.preventDefault();
-                this.showSection(e.target.dataset.section);
-            });
+    // Navigation
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', (e) => {  // Fonction fléchée pour garder le contexte
+            e.preventDefault();
+            this.showSection(e.target.dataset.section);
         });
-
-        document.getElementById('connection-form')
-            .addEventListener('submit', e => { e.preventDefault(); this.handleConnection(); });
-
-        document.getElementById('refresh-workspaces')
-            .addEventListener('click', () => this.refreshWorkspaces());
-        document.getElementById('refresh-spaces')
-            .addEventListener('click', () => this.refreshSpaces());
-        document.getElementById('refresh-lists')
-            .addEventListener('click', () => this.refreshLists());
-        document.getElementById('refresh-tasks')
-            .addEventListener('click', () => this.refreshTasks());
-
-        document.getElementById('execute-all-tasks')
-            .addEventListener('click', () => this.executeAllTasks());
-        document.getElementById('clear-logs')
-            .addEventListener('click', () => this.clearLogs());
-        document.getElementById('status-filter')
-            .addEventListener('change', () => this.loadTasks());
-        this.setupSearch();
-    }
+    });
+ 
+    // Formulaire de connexion
+    document.getElementById('connection-form')
+        .addEventListener('submit', (e) => { 
+            e.preventDefault(); 
+            this.handleConnection(); 
+        });
+ 
+    // Boutons de rafraîchissement
+    document.getElementById('refresh-workspaces')
+        .addEventListener('click', () => this.refreshWorkspaces());
+    document.getElementById('refresh-spaces')
+        .addEventListener('click', () => this.refreshSpaces());
+    document.getElementById('refresh-lists')
+        .addEventListener('click', () => this.refreshLists());
+    document.getElementById('refresh-tasks')
+        .addEventListener('click', () => this.refreshTasks());
+ 
+    // Boutons d'exécution
+    document.getElementById('execute-all-tasks')
+        .addEventListener('click', () => this.executeAllTasks());
+    document.getElementById('clear-logs')
+        .addEventListener('click', () => this.clearLogs());
+    // Filtre de statut
+    document.getElementById('status-filter')
+        .addEventListener('change', () => this.loadTasks());
+    this.setupSearch();
+}
 
     setupSearch() {
         const sections = ['workspaces', 'spaces', 'lists', 'tasks'];
@@ -384,15 +392,115 @@ class ClickUpApp {
         `;
 
         card.querySelector('.execute-task')
-            .addEventListener('click', e => {
-                const btn = e.currentTarget;
-                this.executeTask(btn.dataset.taskId, btn.dataset.taskName, btn.dataset.command, btn);
-            });
-        card.querySelector('.view-task')
-            .addEventListener('click', e => this.viewTaskDetails(e.currentTarget.dataset.taskId));
-
-        return card;
+        .addEventListener('click', (e) => {  // Fonction fléchée
+            const btn = e.currentTarget;
+            this.executeTask(btn.dataset.taskId, btn.dataset.taskName, btn.dataset.command);
+        });
+    // Et aussi :
+    card.querySelector('.view-task')
+        .addEventListener('click', (e) => this.viewTaskDetails(e.currentTarget.dataset.taskId));
+ 
+    return card;
     }
+
+
+      async executeTask(taskId, taskName, command) {
+        console.log('=== EXÉCUTION TÂCHE ===');
+        console.log(`ID: ${taskId}, Nom: ${taskName}`);
+        console.log(`Commande: ${command}`);
+ 
+        if (!command || command.trim() === '') {
+            this.showToast('Aucune commande définie pour cette tâche', 'error');
+            return;
+        }
+ 
+        const result = await this.makeRequest({
+            action: 'executeTask',
+            apiKey: this.config.apiKey,
+            domain: this.config.domain,
+            taskId,
+            taskName,
+            command
+        });
+ 
+        if (result.success) {
+            this.showToast(`Tâche "${taskName}" exécutée avec succès`, 'success');
+            this.addLog('success', `Tâche "${taskName}" : ${result.status}`);
+            // Mettre à jour l'affichage de la tâche
+            const taskCard = document.querySelector(`[data-task-id="${taskId}"]`);
+            if (taskCard) {
+                const outputDiv = taskCard.querySelector(`#output-${taskId}`);
+                if (outputDiv) {
+                    outputDiv.style.display = 'block';
+                    outputDiv.innerHTML = `<strong>Résultat:</strong> ${result.status}<br><pre>${result.output || ''}</pre>`;
+                }
+            }
+        } else {
+            this.showToast(`Erreur: ${result.error}`, 'error');
+            this.addLog('error', `Tâche "${taskName}" : ${result.error}`);
+        }
+    }
+ 
+    async executeAllTasks() {
+        const taskCards = document.querySelectorAll('.execute-task');
+        if (taskCards.length === 0) {
+            this.showToast('Aucune tâche à exécuter', 'info');
+            return;
+        }
+ 
+        this.showToast(`Exécution de ${taskCards.length} tâches...`, 'info');
+        for (const button of taskCards) {
+            const taskId = button.dataset.taskId;
+            const taskName = button.dataset.taskName;
+            const command = button.dataset.command;
+            await this.executeTask(taskId, taskName, command);
+            // Attendre un peu entre les exécutions
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        this.showToast('Toutes les tâches ont été exécutées', 'success');
+    }
+ 
+    executeTasksByStatus(status) {
+        const statusButtons = document.querySelectorAll(`.status-tasks-container .execute-task`);
+        statusButtons.forEach(async (button) => {
+            const taskId = button.dataset.taskId;
+            const taskName = button.dataset.taskName;
+            const command = button.dataset.command;
+            await this.executeTask(taskId, taskName, command);
+        });
+    }
+ 
+    addLog(type, message) {
+        const logsContainer = document.getElementById('logs-container');
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry ${type}`;
+        logEntry.innerHTML = `
+<span class="log-timestamp">[${timestamp}]</span> ${message}
+        `;
+        logsContainer.appendChild(logEntry);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+ 
+    clearLogs() {
+        const logsContainer = document.getElementById('logs-container');
+        logsContainer.innerHTML = '<p class="empty-state">Aucun log pour le moment</p>';
+    }
+ 
+    showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        // Supprimer automatiquement après 5 secondes
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 5000);
+    }
+
 
     // ... (reste des méthodes: executeTask, executeTasksByStatus, viewTaskDetails, modals, logs, etc.)
 }
