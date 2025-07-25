@@ -9,18 +9,19 @@
 #>
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$JsonParams
 )
 
 # Parse les paramètres JSON
 try {
     $params = $JsonParams | ConvertFrom-Json
-} catch {
+}
+catch {
     Write-Output (@{
-        success = $false
-        error = "Erreur parsing JSON: $($_.Exception.Message)"
-    } | ConvertTo-Json)
+            success = $false
+            error   = "Erreur parsing JSON: $($_.Exception.Message)"
+        } | ConvertTo-Json)
     exit 1
 }
 
@@ -30,7 +31,7 @@ $global:Domain = $params.domain
 $global:BaseUrl = "https://api.clickup.com/api/v2"
 $global:Headers = @{
     'Authorization' = $global:ApiKey
-    'Content-Type' = 'application/json'
+    'Content-Type'  = 'application/json'
 }
 
 # Fonction pour écrire des logs structurés
@@ -43,8 +44,8 @@ function Write-StructuredLog {
     
     $logEntry = @{
         timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-        level = $Level
-        message = $Message
+        level     = $Level
+        message   = $Message
     }
     
     if ($Data) {
@@ -113,13 +114,13 @@ function Get-ClickUpWorkspaces {
         $response = Invoke-RestMethod -Uri "$global:BaseUrl/team" -Headers $global:Headers -Method GET
         return @{
             success = $true
-            data = $response.teams | ForEach-Object { @{ id = $_.id; name = $_.name; type = "workspace" } }
+            data    = $response.teams | ForEach-Object { @{ id = $_.id; name = $_.name; type = "workspace" } }
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -132,13 +133,13 @@ function Get-ClickUpSpaces {
         $response = Invoke-RestMethod -Uri "$global:BaseUrl/team/$TeamId/space?archived=false" -Headers $global:Headers -Method GET
         return @{
             success = $true
-            data = $response.spaces | ForEach-Object { @{ id = $_.id; name = $_.name; type = "space" } }
+            data    = $response.spaces | ForEach-Object { @{ id = $_.id; name = $_.name; type = "space" } }
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -158,13 +159,13 @@ function Get-ClickUpFoldersAndLists {
         
         return @{
             success = $true
-            data = @($folders + $lists)
+            data    = @($folders + $lists)
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -177,13 +178,13 @@ function Get-ClickUpFolderLists {
         $response = Invoke-RestMethod -Uri "$global:BaseUrl/folder/$FolderId/list?archived=false" -Headers $global:Headers -Method GET
         return @{
             success = $true
-            data = $response.lists | ForEach-Object { @{ id = $_.id; name = $_.name; type = "list" } }
+            data    = $response.lists | ForEach-Object { @{ id = $_.id; name = $_.name; type = "list" } }
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -196,13 +197,13 @@ function Get-ClickUpListStatuses {
         $response = Invoke-RestMethod -Uri "$global:BaseUrl/list/$ListId" -Headers $global:Headers -Method GET
         return @{
             success = $true
-            data = $response.statuses | ForEach-Object { @{ status = $_.status; color = $_.color } }
+            data    = $response.statuses | ForEach-Object { @{ status = $_.status; color = $_.color } }
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -227,10 +228,10 @@ function Get-ProcessedTasks {
                 $controleCommand = Get-CustomFieldValue -Task $task -FieldName "Contrôle"
                 if (-not [string]::IsNullOrWhiteSpace($controleCommand)) {
                     $automatedTasks += @{
-                        id = $task.id
-                        name = $task.name
+                        id      = $task.id
+                        name    = $task.name
                         command = $controleCommand
-                        status = "pending"
+                        status  = "pending"
                     }
                 }
             }
@@ -238,13 +239,13 @@ function Get-ProcessedTasks {
         
         return @{
             success = $true
-            data = $automatedTasks
+            data    = $automatedTasks
         }
     }
     catch {
         return @{
             success = $false
-            error = $_.Exception.Message
+            error   = $_.Exception.Message
         }
     }
 }
@@ -312,22 +313,22 @@ function Execute-PowerShellCommand {
         
         return @{
             success = $true
-            status = $newStatus
-            output = $output.Trim()
+            status  = $newStatus
+            output  = $output.Trim()
         }
     }
     catch {
         Write-StructuredLog -Level "ERROR" -Message "Erreur exécution tâche" -Data @{ 
             taskId = $TaskId
-            error = $_.Exception.Message
+            error  = $_.Exception.Message
         }
         
         Update-TaskStatus -TaskId $TaskId -NewStatus "NON CONFORME"
         
         return @{
             success = $false
-            status = "NON CONFORME"
-            error = $_.Exception.Message
+            status  = "NON CONFORME"
+            error   = $_.Exception.Message
         }
     }
 }
@@ -358,10 +359,10 @@ try {
             $clickupConnected = Test-ClickUpConnection
             
             Write-Output (@{
-                success = $msConnected -and $clickupConnected
-                microsoftConnected = $msConnected
-                clickupConnected = $clickupConnected
-            } | ConvertTo-Json)
+                    success            = $msConnected -and $clickupConnected
+                    microsoftConnected = $msConnected
+                    clickupConnected   = $clickupConnected
+                } | ConvertTo-Json)
         }
         
         "getWorkspaces" {
@@ -395,21 +396,38 @@ try {
         }
         
         "executeTask" {
+            Write-StructuredLog -Level "INFO" -Message "Case executeTask appelé" -Data @{ 
+                taskId   = $params.taskId
+                taskName = $params.taskName
+                command  = $params.command
+            }
+    
+            if ([string]::IsNullOrWhiteSpace($params.command)) {
+                Write-Output (@{
+                        success = $false
+                        error   = "Commande vide ou nulle"
+                    } | ConvertTo-Json)
+                return
+            }
+    
             $result = Execute-PowerShellCommand -Command $params.command -TaskId $params.taskId -TaskName $params.taskName
+    
+            Write-StructuredLog -Level "INFO" -Message "Résultat execution" -Data $result
+    
             Write-Output ($result | ConvertTo-Json)
         }
         
         default {
             Write-Output (@{
-                success = $false
-                error = "Action non reconnue: $($params.action)"
-            } | ConvertTo-Json)
+                    success = $false
+                    error   = "Action non reconnue: $($params.action)"
+                } | ConvertTo-Json)
         }
     }
 }
 catch {
     Write-Output (@{
-        success = $false
-        error = "Erreur script principal: $($_.Exception.Message)"
-    } | ConvertTo-Json)
+            success = $false
+            error   = "Erreur script principal: $($_.Exception.Message)"
+        } | ConvertTo-Json)
 }
